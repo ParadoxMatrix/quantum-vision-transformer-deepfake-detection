@@ -1,51 +1,59 @@
-import torch.utils.data as data
-from torchvision import transforms
-from torchvision.io import read_video
-import os
+import torch
+import torch.nn as nn
+import qiskit as qis
 
-def get_loaders(batch_size, classes=None):
-    data_dir_real = 'dataset_folder/Celeb-real'
-    data_dir_fake = 'dataset_folder/Celeb-synthesis'
+import data as d
 
-    train_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,)),  # Normalizing with a single channel mean/std
-    ])
-    test_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,)),  # Normalizing with a single channel mean/std
-    ])
+from qiskit_machine_learning.neural_networks import SamplerQNN
+from qiskit_machine_learning.connectors import TorchConnector
 
-    def load_videos_from_folder(folder, transform):
-        videos = []
-        labels = []
-        for filename in os.listdir(folder):
-            if filename.endswith(".mp4"):
-                video_path = os.path.join(folder, filename)
-                video, _, _ = read_video(video_path)
-                if transform:
-                    video = transform(video)
-                videos.append(video)
-                label = 0 if 'real' in folder else 1  # Assuming folder names indicate real/fake
-                labels.append(label)
-        return videos, labels
+from tqdm import tqdm
 
-    train_videos_real, train_labels_real = load_videos_from_folder(data_dir_real, train_transform)
-    train_videos_fake, train_labels_fake = load_videos_from_folder(data_dir_fake, train_transform)
-    test_videos_real, test_labels_real = load_videos_from_folder(data_dir_real, test_transform)
-    test_videos_fake, test_labels_fake = load_videos_from_folder(data_dir_fake, test_transform)
+from qiskit_aer import AerSimulator
+from qiskit_aer.primitives import Sampler
+from functools import reduce
 
-    train_videos = train_videos_real + train_videos_fake
-    train_labels = train_labels_real + train_labels_fake
-    test_videos = test_videos_real + test_videos_fake
-    test_labels = test_labels_real + test_labels_fake
+import numpy as np
 
-    train_dataset = data.TensorDataset(torch.stack(train_videos), torch.tensor(train_labels))
-    test_dataset = data.TensorDataset(torch.stack(test_videos), torch.tensor(test_labels))
+import matplotlib.pyplot as plt
+from qiskit_algorithms.utils import algorithm_globals
 
-    train_loader = data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True, pin_memory=True, num_workers=4)
-    test_loader = data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=4)
+import circuits as C
 
-    return train_loader, test_loader
+class HybridMLP(nn.Module):
+
+    def __init__(self, embed_dim, num_layers, num_classes, hidden_size, vec_loader_name, matrix_mul_name):
+        super().__init__()
+
+        self.flatten = nn.Flatten()
+        self.linear1 = nn.Linear(224*224*3, embed_dim)  # Adjusted for 224x224 RGB frames
+        self.linear3 = nn.Linear(embed_dim, num_classes)
+
+        aersim = AerSimulator(method='statevector', device='GPU')
+        sampler = Sampler()
+        sampler.set_options(backend=aersim)
+
+        self.vx = C.Vx(embed_dim, vec_loader_name, matrix_mul_name)
+        qc, num_weights = self.vx()
+
+        self.num_layers = num_layers
+        self.vx_list = nn.ModuleList([TorchConnector(SamplerQNN(circuit=qc, input_params=qc.parameters[-embed_dim+1:], weight_params=qc.parameters[:num_weights], input_gradients=True, sampler=sampler)) for _ in range(num_layers)])
+
+        self.actv = nn.ReLU()
+        self.ei = [2**j for j in range(0, embed_dim)]
+
+    def forward(self, x):
+        x = self.flatten(x)
+        x = self.linear1(x)
+        x = self.actv(x)
+
+        x = x / torch.sqrt(torch.sum(torch.pow(x, 2) + 1e-4, dim=1, keepdim=True) + 1e-8)
+        for i in range(self.num_layers):
+            x = self.vx.get_RBS_parameters(x[:, None, :])
+            x = self.vx_list[i](x[:, 0, :])[:, self.ei]
+
+            x = torch.sqrt(x + 1e-8)
+            x = self.actv(x)
+
+        x = self.linear3(x)
+        return x
