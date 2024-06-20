@@ -1,3 +1,5 @@
+#training_pipe.py
+
 import torch
 
 import hybrid_mlp as H
@@ -33,7 +35,6 @@ def run(c):
 
     criterion = torch.nn.CrossEntropyLoss()
 
-    # In this code (for now) I use the test set of PyTorch as the validation set. I don’t use this to do any hyperparameter search or to compare any results
     T.train(model, c['epochs'], train_loader, test_loader, optimizer, criterion, c['dir_path'], device)
 
     return
