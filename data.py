@@ -1,4 +1,5 @@
-#data.py
+#data.py for gpu
+
 
 import torch
 import torch.utils.data as data
