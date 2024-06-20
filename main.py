@@ -1,3 +1,5 @@
+#main.py
+
 import argparse
 import training_pipe
 
@@ -5,7 +7,7 @@ config = {}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='QVT')
-    parser.add_argument("--dir_path", type=str, default="./temp", help='')
+    parser.add_argument("--dir_path", type=str, default="/content/quantum-vision-transformer-deepfake-detection", help='')
     parser.add_argument("--model", type=str, default="qvt", help='')
     parser.add_argument("--hybrid", default=False, action='store_true', help='')
     parser.add_argument("--epochs", type=int, default=1, help='epochs')
