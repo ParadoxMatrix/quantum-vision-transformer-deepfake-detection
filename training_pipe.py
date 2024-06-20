@@ -1,4 +1,5 @@
-#training_pipe.py
+#training_pipe.py for gpu
+
 
 import torch
 
